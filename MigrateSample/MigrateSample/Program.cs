@@ -1,8 +1,11 @@
-﻿using System;
+﻿using Microsoft.Office.Interop.OneNote;
+using System;
 using System.Collections.Generic;
 using System.Linq;
 using System.Text;
 using System.Threading.Tasks;
+using System.Xml;
+using System.Xml.Linq;
 
 namespace MigrateSample
 {
@@ -26,10 +29,88 @@ namespace MigrateSample
             if (args.Length != 2)
             {
                 Console.WriteLine("Usage: MigrateSample <localfile> <remoteurl>");
+                Console.WriteLine(@"Example: MigrateSample ""C:\Users\jayongg\Documents\OneNote Notebooks\My Notebook"" ""https://microsoft-my.sharepoint.com/personal/jayongg_microsoft_com/Documents/TestNotebook/""");
                 return;
             }
-            
 
+            var localNotebook = args[0];
+            var remoteNotebook = args[1];
+
+            var app = new Application();
+            string localNotebookId;
+            app.OpenHierarchy(localNotebook, "", out localNotebookId);
+
+            string remoteNotebookId;
+            app.OpenHierarchy(remoteNotebook, "", out remoteNotebookId);
+
+            // just in case there's content, let's just sync everything
+            app.SyncHierarchy(remoteNotebookId);
+
+            // we have both open, now let's copy the sections over.  We should do this recursively, since there can be section groups.
+            Dictionary<string, string> sectionMappings = new Dictionary<string, string>();
+            CopyNotebookRecursively(app, localNotebookId, remoteNotebookId, sectionMappings);
+        }
+
+        private void CopyNotebookRecursively(Application app, string localNotebookId, string remoteNotebookId, Dictionary<string, string> sectionMappings)
+        {
+            // TODO: possible to get this dynamically. e.g. http://stackoverflow.com/questions/934486/how-do-i-get-a-nametable-from-an-xdocument
+            const string strNamespace = "http://schemas.microsoft.com/office/onenote/2013/onenote";
+
+            // get the hierarchy
+            string xmlLocal;
+            app.GetHierarchy(localNotebookId, HierarchyScope.hsSections, out xmlLocal);
+
+            string xmlRemote;
+            app.GetHierarchy(remoteNotebookId, HierarchyScope.hsSelf, out xmlRemote);
+
+            XDocument xdocLocal = XDocument.Parse(xmlLocal);
+            XNamespace oneNs = strNamespace;
+
+            var remoteFolderId = remoteNotebookId;
+            var xdocSourceFolderElement = xdocLocal.Root;
+            CopyFolderRecursively(app, oneNs, xdocSourceFolderElement, remoteFolderId, string.Empty);
+
+            // let's sync to make sure things get up to the server
+            app.SyncHierarchy(remoteNotebookId);
+        }
+
+        private static void CopyFolderRecursively(Application app, XNamespace oneNs, XElement xdocSourceFolderElement, string remoteFolderId, string loggingPrefix)
+        {
+            // copy each section over
+            var sectionElements = xdocSourceFolderElement.Elements(oneNs + "Section");
+            foreach (var sectionElement in sectionElements)
+            {
+                // Copy the section remotely with the same name as the original
+                var sectionNameAttribute = sectionElement.Attribute("name");
+                var sectionIdAttribute = sectionElement.Attribute("ID");
+                string remoteSectionId;
+
+                Console.WriteLine(loggingPrefix + sectionNameAttribute.Value);
+                app.OpenHierarchy(sectionNameAttribute.Value + ".one", remoteFolderId, out remoteSectionId, CreateFileType.cftSection);
+
+                app.MergeSections(sectionIdAttribute.Value, remoteSectionId);
+            }
+
+            // now lets do this for each section group
+            var sgElements = xdocSourceFolderElement.Elements(oneNs + "SectionGroup");
+            foreach (var sgElement in sgElements)
+            {
+                // skip recycle bin
+                var isRecycleAttribute = sgElement.Attribute("isRecycleBin")?.Value;
+                if (isRecycleAttribute != null && isRecycleAttribute == "true")
+                    continue;
+
+                // Create the section group remotely, with name of source section group
+                var sgNameAttribute = sgElement.Attribute("name");
+                var sgIdAttribute = sgElement.Attribute("ID");
+                string remoteSgId;
+                Console.WriteLine(loggingPrefix + sgNameAttribute.Value);
+
+                app.OpenHierarchy(sgNameAttribute.Value, remoteFolderId, out remoteSgId, CreateFileType.cftFolder);
+
+                // Copy the contents of the source section group to remote section group
+                CopyFolderRecursively(app, oneNs, sgElement, remoteSgId, loggingPrefix + "    ");
+            }
         }
     }
 }
