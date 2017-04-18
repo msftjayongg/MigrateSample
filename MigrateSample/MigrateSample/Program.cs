@@ -17,6 +17,10 @@ namespace MigrateSample
     /// 
     class Program
     {
+        // TODO: possible to get this dynamically. e.g. http://stackoverflow.com/questions/934486/how-do-i-get-a-nametable-from-an-xdocument
+        private const string strNamespace = "http://schemas.microsoft.com/office/onenote/2013/onenote";
+        private XNamespace oneNs = strNamespace;
+
         static void Main(string[] args)
         {
             var program = new Program();
@@ -28,8 +32,8 @@ namespace MigrateSample
         {
             if (args.Length != 2)
             {
-                Console.WriteLine("Usage: MigrateSample <localfile> <remoteurl>");
-                Console.WriteLine(@"Example: MigrateSample ""C:\Users\jayongg\Documents\OneNote Notebooks\My Notebook"" ""https://microsoft-my.sharepoint.com/personal/jayongg_microsoft_com/Documents/TestNotebook/""");
+                Console.WriteLine("Usage: MigrateSample <localfile> <remoteurlOfNewNotebook>");
+                Console.WriteLine(@"Example: MigrateSample ""C:\Users\jayongg\Documents\OneNote Notebooks\My Notebook"" ""https://microsoft-my.sharepoint.com/personal/jayongg_microsoft_com/Documents""");
                 return;
             }
 
@@ -40,8 +44,18 @@ namespace MigrateSample
             string localNotebookId;
             app.OpenHierarchy(localNotebook, "", out localNotebookId);
 
+            string xmlLocal;
+            app.GetHierarchy(localNotebookId, HierarchyScope.hsSelf, out xmlLocal);
+
+            // get the local notebook name
+            XDocument xdoc = XDocument.Parse(xmlLocal);
+            var xnameElement = xdoc.Root.Attribute("nickname");
+
+            Console.WriteLine("Opened Notebook " + xnameElement.Value);
+
+            // create the notebook. FYI if there is a notebook with the same name already, this code will just open it
             string remoteNotebookId;
-            app.OpenHierarchy(remoteNotebook, "", out remoteNotebookId);
+            app.OpenHierarchy(remoteNotebook + xnameElement.Value + " - Remote", string.Empty, out remoteNotebookId, CreateFileType.cftNotebook);
 
             // just in case there's content, let's just sync everything
             app.SyncHierarchy(remoteNotebookId);
@@ -49,13 +63,15 @@ namespace MigrateSample
             // we have both open, now let's copy the sections over.  We should do this recursively, since there can be section groups.
             Dictionary<string, string> sectionMappings = new Dictionary<string, string>();
             CopyNotebookRecursively(app, localNotebookId, remoteNotebookId, sectionMappings);
+
+            // A final sync for good luck
+            app.SyncHierarchy(remoteNotebookId);
+
+            // worth doing some quick verifications if possible - compare the local and remote page hierarchies and some content.
         }
 
         private void CopyNotebookRecursively(Application app, string localNotebookId, string remoteNotebookId, Dictionary<string, string> sectionMappings)
         {
-            // TODO: possible to get this dynamically. e.g. http://stackoverflow.com/questions/934486/how-do-i-get-a-nametable-from-an-xdocument
-            const string strNamespace = "http://schemas.microsoft.com/office/onenote/2013/onenote";
-
             // get the hierarchy
             string xmlLocal;
             app.GetHierarchy(localNotebookId, HierarchyScope.hsSections, out xmlLocal);
@@ -64,7 +80,6 @@ namespace MigrateSample
             app.GetHierarchy(remoteNotebookId, HierarchyScope.hsSelf, out xmlRemote);
 
             XDocument xdocLocal = XDocument.Parse(xmlLocal);
-            XNamespace oneNs = strNamespace;
 
             var remoteFolderId = remoteNotebookId;
             var xdocSourceFolderElement = xdocLocal.Root;
