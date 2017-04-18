@@ -32,7 +32,7 @@ namespace MigrateSample
         {
             if (args.Length != 2)
             {
-                Console.WriteLine("Usage: MigrateSample <localfile> <remoteurlOfNewNotebook>");
+                Console.WriteLine("Usage: MigrateSample <localfile> <urlFolderOfRemoteNotebook>");
                 Console.WriteLine(@"Example: MigrateSample ""C:\Users\jayongg\Documents\OneNote Notebooks\My Notebook"" ""https://microsoft-my.sharepoint.com/personal/jayongg_microsoft_com/Documents""");
                 return;
             }
