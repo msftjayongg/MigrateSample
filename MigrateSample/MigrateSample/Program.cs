@@ -37,6 +37,9 @@ namespace MigrateSample
                 return;
             }
 
+            Console.WriteLine("press any key");
+            Console.ReadLine();
+
             var localNotebook = args[0];
             var remoteNotebook = args[1];
 
@@ -83,13 +86,13 @@ namespace MigrateSample
 
             var remoteFolderId = remoteNotebookId;
             var xdocSourceFolderElement = xdocLocal.Root;
-            CopyFolderRecursively(app, oneNs, xdocSourceFolderElement, remoteFolderId, string.Empty);
+            CopyFolderRecursively(app, oneNs, xdocSourceFolderElement, localNotebookId, remoteFolderId, string.Empty);
 
             // let's sync to make sure things get up to the server
             app.SyncHierarchy(remoteNotebookId);
         }
 
-        private static void CopyFolderRecursively(Application app, XNamespace oneNs, XElement xdocSourceFolderElement, string remoteFolderId, string loggingPrefix)
+        private static void CopyFolderRecursively(Application app, XNamespace oneNs, XElement xdocSourceFolderElement, string localNotebookId, string remoteFolderId, string loggingPrefix)
         {
             // copy each section over
             var sectionElements = xdocSourceFolderElement.Elements(oneNs + "Section");
@@ -98,12 +101,28 @@ namespace MigrateSample
                 // Copy the section remotely with the same name as the original
                 var sectionNameAttribute = sectionElement.Attribute("name");
                 var sectionIdAttribute = sectionElement.Attribute("ID");
-                string remoteSectionId;
 
+                string strDotOne = sectionNameAttribute.Value + ".one";
+                string tempDotOnePath = System.IO.Path.GetTempPath() + strDotOne;
+
+                // Publish the section to a temporary .one file
+                string strLocalSectionId;
                 Console.WriteLine(loggingPrefix + sectionNameAttribute.Value);
-                app.OpenHierarchy(sectionNameAttribute.Value + ".one", remoteFolderId, out remoteSectionId, CreateFileType.cftSection);
+                app.OpenHierarchy(sectionNameAttribute.Value, localNotebookId, out strLocalSectionId);
+                app.Publish(strLocalSectionId, tempDotOnePath);
 
-                app.MergeSections(sectionIdAttribute.Value, remoteSectionId);
+                // Open the temporary .one
+                string tempLocalId;
+                app.OpenHierarchy(tempDotOnePath, "", out tempLocalId);
+
+                // Get its xml
+                XmlDocument xmlDoc = new XmlDocument();
+                string hierarchy = "";
+                app.GetHierarchy(tempLocalId, HierarchyScope.hsSelf, out hierarchy);
+                xmlDoc.LoadXml(hierarchy);
+
+                // Move the temporary .one to the remote notebook
+                app.UpdateHierarchy(xmlDoc.OuterXml);
             }
 
             // now lets do this for each section group
@@ -124,7 +143,7 @@ namespace MigrateSample
                 app.OpenHierarchy(sgNameAttribute.Value, remoteFolderId, out remoteSgId, CreateFileType.cftFolder);
 
                 // Copy the contents of the source section group to remote section group
-                CopyFolderRecursively(app, oneNs, sgElement, remoteSgId, loggingPrefix + "    ");
+                CopyFolderRecursively(app, oneNs, sgElement, localNotebookId, remoteSgId, loggingPrefix + "    ");
             }
         }
     }
