@@ -1,6 +1,7 @@
 ﻿using Microsoft.Office.Interop.OneNote;
 using System;
 using System.Collections.Generic;
+using System.IO;
 using System.Linq;
 using System.Text;
 using System.Threading.Tasks;
@@ -103,13 +104,16 @@ namespace MigrateSample
                 var sectionIdAttribute = sectionElement.Attribute("ID");
 
                 string strDotOne = sectionNameAttribute.Value + ".one";
-                string tempDotOnePath = System.IO.Path.GetTempPath() + strDotOne;
+                string tempDotOnePath = Path.Combine(System.IO.Path.GetTempPath(), strDotOne);
 
                 // Publish the section to a temporary .one file
-                string strLocalSectionId;
                 Console.WriteLine(loggingPrefix + sectionNameAttribute.Value);
-                app.OpenHierarchy(sectionNameAttribute.Value, localNotebookId, out strLocalSectionId);
-                app.Publish(strLocalSectionId, tempDotOnePath);
+
+                // delete any preexisting .one file
+                File.Delete(tempDotOnePath);
+
+                // publish the section, given the section ID.
+                app.Publish(sectionIdAttribute.Value, tempDotOnePath);
 
                 // Open the temporary .one
                 string tempLocalId;
