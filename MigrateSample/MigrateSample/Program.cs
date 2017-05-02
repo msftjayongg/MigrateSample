@@ -38,40 +38,99 @@ namespace MigrateSample
                 return;
             }
 
-            Console.WriteLine("press any key");
-            Console.ReadLine();
+            string localNotebook = args[0];
+            string remoteNotebook = args[1];
 
-            var localNotebook = args[0];
-            var remoteNotebook = args[1];
+            Application app = new Application();
 
-            var app = new Application();
             string localNotebookId;
             app.OpenHierarchy(localNotebook, "", out localNotebookId);
+            app.SyncHierarchy(localNotebookId);
 
             string xmlLocal;
-            app.GetHierarchy(localNotebookId, HierarchyScope.hsSelf, out xmlLocal);
+            app.GetHierarchy(localNotebookId, HierarchyScope.hsSections, out xmlLocal);
 
             // get the local notebook name
-            XDocument xdoc = XDocument.Parse(xmlLocal);
-            var xnameElement = xdoc.Root.Attribute("nickname");
-
+            XDocument xdocLocal = XDocument.Parse(xmlLocal);
+            XAttribute xnameElement = xdocLocal.Root.Attribute("nickname");
             Console.WriteLine("Opened Notebook " + xnameElement.Value);
 
-            // create the notebook. FYI if there is a notebook with the same name already, this code will just open it
+            // Create a temporary copy of the local notebook
+            string tempLocalNotebook = Path.Combine(System.IO.Path.GetTempPath(), xnameElement.Value);
+
+            // If the temp notebook already exists, delete it
+            if (System.IO.Directory.Exists(tempLocalNotebook))
+            {
+                Console.WriteLine(tempLocalNotebook + " already exists, deleting...");
+                System.IO.Directory.Delete(tempLocalNotebook, true /*recursive*/);
+            }
+
+            Console.WriteLine("Copying " + localNotebook + " to " + tempLocalNotebook);
+            DirectoryCopy(localNotebook, tempLocalNotebook, true /*copySubDirs*/);
+
+            string tempLocalNotebookId;
+            app.OpenHierarchy(tempLocalNotebook, "", out tempLocalNotebookId);
+            app.SyncHierarchy(tempLocalNotebookId);
+            System.Threading.Thread.Sleep(1000);
+
+            string xmlTempLocal;
+            app.GetHierarchy(tempLocalNotebookId, HierarchyScope.hsSections, out xmlTempLocal);
+
+            // get the local notebook name
+            XDocument xdocTempLocal = XDocument.Parse(xmlTempLocal);
+            xnameElement = xdocTempLocal.Root.Attribute("nickname");
+            Console.WriteLine("Opened Temp Notebook " + xnameElement.Value);
+
+
+            // Get all the elements of the temporary notebook
+            var elementsToMove = xdocTempLocal.Root.Descendants();
+
+            // Full XDocument version
+            // Get the full hierarchy
+            //string xmlFullHierarchy;
+            //app.GetHierarchy("", HierarchyScope.hsSections, out xmlFullHierarchy);
+            //XDocument xdocFull = XDocument.Parse(xmlFullHierarchy);
+            //var notebookElements = xdocFull.Descendants(oneNs + "Notebook");
+
+            //foreach (var notebookElement in notebookElements)
+            //{
+            //    if (notebookElement.Attribute("ID").Value == remoteNotebookId)
+            //    {
+            //        notebookElement.Add(elementsToMove);
+            //    }
+            //}
+
+            // create the remote notebook. FYI if there is a notebook with the same name already, this code will just open it
             string remoteNotebookId;
             app.OpenHierarchy(remoteNotebook + xnameElement.Value + " - Remote", string.Empty, out remoteNotebookId, CreateFileType.cftNotebook);
 
-            // just in case there's content, let's just sync everything
+            // just in case there's content, sync the remote notebook
             app.SyncHierarchy(remoteNotebookId);
 
-            // we have both open, now let's copy the sections over.  We should do this recursively, since there can be section groups.
-            Dictionary<string, string> sectionMappings = new Dictionary<string, string>();
-            CopyNotebookRecursively(app, localNotebookId, remoteNotebookId, sectionMappings);
+            // Just remote XDocument version
+            string xmlRemoteHierarchy;
+            app.GetHierarchy(remoteNotebookId, HierarchyScope.hsSections, out xmlRemoteHierarchy);
+            XDocument xdocRemote = XDocument.Parse(xmlRemoteHierarchy);
+            xdocRemote.Root.Add(elementsToMove);
+            //XmlDocument xmlDocUpdated = new XmlDocument();
+            //xmlDocUpdated.LoadXml(xdocRemote.ToString());
 
-            // A final sync for good luck
+            // Update the hierarchy with the modified xml
+            app.UpdateHierarchy(xdocRemote.ToString());
+
+            // Sync the remote notebook again for good measure
             app.SyncHierarchy(remoteNotebookId);
 
             // worth doing some quick verifications if possible - compare the local and remote page hierarchies and some content.
+
+            // Cleanup - close and delete the temp notebook
+            app.CloseNotebook(tempLocalNotebookId);
+            if (System.IO.Directory.Exists(tempLocalNotebook))
+            {
+                Console.WriteLine("Cleaning up " + tempLocalNotebook);
+                System.IO.Directory.Delete(tempLocalNotebook, true /*recursive*/);
+            }
+
         }
 
         private void CopyNotebookRecursively(Application app, string localNotebookId, string remoteNotebookId, Dictionary<string, string> sectionMappings)
@@ -107,7 +166,7 @@ namespace MigrateSample
                 string tempDotOnePath = Path.Combine(System.IO.Path.GetTempPath(), strDotOne);
 
                 // Publish the section to a temporary .one file
-                Console.WriteLine(loggingPrefix + sectionNameAttribute.Value);
+                Console.WriteLine(loggingPrefix + "Publishing " + sectionNameAttribute.Value + " ID: " + sectionIdAttribute.Value);
 
                 // delete any preexisting .one file
                 File.Delete(tempDotOnePath);
@@ -148,6 +207,42 @@ namespace MigrateSample
 
                 // Copy the contents of the source section group to remote section group
                 CopyFolderRecursively(app, oneNs, sgElement, localNotebookId, remoteSgId, loggingPrefix + "    ");
+            }
+        }
+        private static void DirectoryCopy(string sourceDirName, string destDirName, bool copySubDirs)
+        {
+            // Get the subdirectories for the specified directory.
+            DirectoryInfo dir = new DirectoryInfo(sourceDirName);
+
+            if (!dir.Exists)
+            {
+                Console.WriteLine("Source directory does not exist or could not be found: " + sourceDirName);
+                return;
+            }
+
+            DirectoryInfo[] dirs = dir.GetDirectories();
+            // If the destination directory doesn't exist, create it.
+            if (!Directory.Exists(destDirName))
+            {
+                Directory.CreateDirectory(destDirName);
+            }
+
+            // Get the files in the directory and copy them to the new location.
+            FileInfo[] files = dir.GetFiles();
+            foreach (FileInfo file in files)
+            {
+                string temppath = Path.Combine(destDirName, file.Name);
+                file.CopyTo(temppath, false);
+            }
+
+            // If copying subdirectories, copy them and their contents to new location.
+            if (copySubDirs)
+            {
+                foreach (DirectoryInfo subdir in dirs)
+                {
+                    string temppath = Path.Combine(destDirName, subdir.Name);
+                    DirectoryCopy(subdir.FullName, temppath, copySubDirs);
+                }
             }
         }
     }
