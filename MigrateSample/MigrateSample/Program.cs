@@ -102,7 +102,18 @@ namespace MigrateSample
             string xmlRemoteHierarchy;
             app.GetHierarchy(remoteNotebookId, HierarchyScope.hsSections, out xmlRemoteHierarchy);
             XDocument xdocRemote = XDocument.Parse(xmlRemoteHierarchy);
-            xdocRemote.Root.Add(elementsToMove);
+
+            // If there are existing sectionGroups add the elements before them
+            var sectionGroups = xdocRemote.Root.Elements(oneNs + "SectionGroup");
+            if (sectionGroups.Count() > 0)
+            {
+                sectionGroups.First().AddBeforeSelf(elementsToMove);
+            }
+            // Otherwise just add them under the root
+            else
+            {
+                xdocRemote.Root.Add(elementsToMove);
+            }
 
             // Update the hierarchy with the modified xml
             app.UpdateHierarchy(xdocRemote.ToString());
